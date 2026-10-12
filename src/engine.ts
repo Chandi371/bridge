@@ -176,6 +176,19 @@ export class BridgeEngine extends EventEmitter {
         throw new Error(`Agent '${targetAgent.name}' is currently disabled.`);
       }
 
+      if (!targetAgent.online) {
+        const lastSeenMinutes = targetAgent.last_seen
+          ? Math.max(1, Math.round((Date.now() - targetAgent.last_seen) / 60000))
+          : null;
+        const lastSeenText = lastSeenMinutes ? ` (last seen ${lastSeenMinutes} min ago)` : '';
+        const onlineAgents = this.db.listAgents().filter((a) => a.online && a.id !== targetAgent.id);
+        const altText = onlineAgents.length > 0
+          ? ` Online alternatives: ${onlineAgents.map((a) => a.name).join(', ')}.`
+          : ' No other agents are currently online.';
+
+        throw new Error(`Agent '${targetAgent.name}' is offline${lastSeenText}.${altText}`);
+      }
+
       // Check if this is an answer to an existing question
       if (params.reply_to) {
         const replyMsg = this.db.getMessageById(params.reply_to);

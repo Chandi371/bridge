@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { BridgeEngine } from './engine.js';
 
-export function createViewsAndPasteRouter(engine: BridgeEngine) {
+export function createViewsAndPasteRouter(engine: BridgeEngine, apiKey?: string) {
   const router = new Hono();
 
   // /room/:id/view?key=SECRET
@@ -14,7 +14,7 @@ export function createViewsAndPasteRouter(engine: BridgeEngine) {
       return c.text(`Room '${roomId}' not found.`, 404);
     }
 
-    // Key validation
+    // Unguessable revocable key validation
     const expectedKey = engine.hashToken(roomId).slice(0, 16);
     if (!key || key !== expectedKey) {
       return c.text('Invalid or missing room view access key.', 403);
@@ -32,8 +32,13 @@ export function createViewsAndPasteRouter(engine: BridgeEngine) {
     return c.text(output);
   });
 
-  // /paste: Copy-paste fallback page
+  // /paste: Copy-paste fallback page (Protected by key query param or Authorization header)
   router.get('/paste', (c) => {
+    const key = c.req.query('key') || c.req.header('x-api-key') || c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+    if (apiKey && key !== apiKey) {
+      return c.text('Unauthorized. Provide valid access key: /paste?key=YOUR_API_KEY', 401);
+    }
+
     const promptSnippet = `You do not have native tool access to the local Bridge server. 
 Whenever you wish to interact with agents or query information, respond strictly with a fenced code block:
 \`\`\`bridge
@@ -84,6 +89,7 @@ I will paste your request into Bridge and paste back the response.`;
         </div>
 
         <script>
+          const authKey = "${key || ''}";
           async function submitPayload() {
             const raw = document.getElementById('pasteInput').value;
             const match = raw.match(/\`\`\`(?:bridge)?\\s*([\\s\\S]*?)\`\`\`/);
@@ -91,9 +97,12 @@ I will paste your request into Bridge and paste back the response.`;
 
             try {
               const payload = JSON.parse(jsonText);
+              const headers = { 'Content-Type': 'application/json' };
+              if (authKey) headers['Authorization'] = 'Bearer ' + authKey;
+
               const res = await fetch('/api/send', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(payload)
               });
               const data = await res.json();

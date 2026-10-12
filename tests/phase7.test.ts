@@ -14,12 +14,17 @@ describe('Phase 7: Dashboard, /paste, /room/:id/view, and External Runners', () 
   beforeEach(() => {
     db = new BridgeDatabase(':memory:');
     engine = new BridgeEngine(db);
-    viewsRouter = createViewsAndPasteRouter(engine);
+    viewsRouter = createViewsAndPasteRouter(engine, 'secret-api-key');
     dashRouter = createDashboardRouter(engine, 'http://localhost:3000');
   });
 
-  it('serves copy-paste fallback page with instruction snippet at /paste', async () => {
-    const res = await viewsRouter.fetch(new Request('http://localhost:3000/paste'));
+  it('rejects unauthenticated access to /paste with 401 and serves page on valid key', async () => {
+    // Unauthenticated
+    const unauth = await viewsRouter.fetch(new Request('http://localhost:3000/paste'));
+    expect(unauth.status).toBe(401);
+
+    // Authenticated via query key
+    const res = await viewsRouter.fetch(new Request('http://localhost:3000/paste?key=secret-api-key'));
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('Bridge Copy-Paste Fallback');

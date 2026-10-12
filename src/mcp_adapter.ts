@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -6,27 +7,97 @@ import { BridgeEngine } from './engine.js';
 
 export function createMcpRouter(options: {
   engine: BridgeEngine;
+  publicBaseUrl: string;
   isTokenAuthorized: (token: string) => boolean;
 }) {
   const router = new Hono();
-  const sessions = new Map<string, { server: Server; transport: SSEServerTransport }>();
+  const sessions = new Map<string, { server: Server; transport: SSEServerTransport; createdAt: number }>();
 
   // Token Auth Middleware for /mcp and /mcp/*
+  router.use('/mcp', async (c, next) => {
+    return handleAuth(c, next);
+  });
   router.use('/mcp/*', async (c, next) => {
+    return handleAuth(c, next);
+  });
+
+  async function handleAuth(c: any, next: any) {
     const authHeader = c.req.header('Authorization');
     const token = authHeader?.replace(/^Bearer\s+/i, '');
 
     if (!token || !options.isTokenAuthorized(token)) {
+      const base = options.publicBaseUrl.replace(/\/+$/, '');
+      const metadataUrl = `${base}/.well-known/oauth-protected-resource`;
+      c.header('WWW-Authenticate', `Bearer resource_metadata="${metadataUrl}"`);
       return c.json({ error: 'Unauthorized MCP access' }, 401);
     }
     await next();
+  }
+
+  // GET /mcp: Establishes SSE stream or reports streamable HTTP endpoint status
+  router.get('/mcp', async (c) => {
+    const accept = c.req.header('Accept') || '';
+    if (accept.includes('text/event-stream')) {
+      const sessionId = `mcp_sess_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+      const sseContent = `event: endpoint\ndata: ${options.publicBaseUrl}/mcp/messages?sessionId=${sessionId}\n\n`;
+      return new Response(sseContent, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'mcp-session-id': sessionId,
+        },
+      });
+    }
+
+    return c.json({
+      status: 'ready',
+      transport: 'Streamable HTTP / SSE',
+      endpoint: `${options.publicBaseUrl}/mcp`,
+      messages_endpoint: `${options.publicBaseUrl}/mcp/messages`,
+    });
   });
 
-  // GET /mcp/sse or /mcp: Establishes SSE stream
-  router.get('/mcp', async (c) => {
-    // In Node.js environment, handle SSE transport
-    const res = c.env?.incoming; // or Node Server res
-    return c.text('MCP SSE Endpoint ready. Connect with MCP Streamable HTTP / SSE client.');
+  // POST /mcp/messages: Streamable HTTP message handling
+  router.post('/mcp/messages', async (c) => {
+    try {
+      const body = await c.req.json();
+      const mcpServer = setupMcpServer(options.engine);
+
+      // Handle JSON-RPC method
+      if (body.method === 'tools/list') {
+        const handler = (mcpServer as any)._requestHandlers.get('tools/list');
+        const res = await handler(body);
+        return c.json({ jsonrpc: '2.0', id: body.id, result: res });
+      }
+
+      if (body.method === 'tools/call') {
+        const handler = (mcpServer as any)._requestHandlers.get('tools/call');
+        const res = await handler(body);
+        return c.json({ jsonrpc: '2.0', id: body.id, result: res });
+      }
+
+      return c.json({
+        jsonrpc: '2.0',
+        id: body.id,
+        error: { code: -32601, message: `Method not found: ${body.method}` },
+      });
+    } catch (e: any) {
+      return c.json({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: e.message },
+      }, 500);
+    }
+  });
+
+  // DELETE /mcp: Session termination
+  router.delete('/mcp', (c) => {
+    const sessionId = c.req.header('mcp-session-id') || c.req.query('sessionId');
+    if (sessionId) {
+      sessions.delete(sessionId);
+    }
+    return c.json({ status: 'session_terminated' });
   });
 
   // Setup MCP Server instance for tool calls

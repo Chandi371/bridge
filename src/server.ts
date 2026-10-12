@@ -57,6 +57,7 @@ export class BridgeServer {
     // 3. Setup MCP router
     const mcp = createMcpRouter({
       engine: this.engine,
+      publicBaseUrl: this.config.publicBaseUrl,
       isTokenAuthorized: (token) => {
         return oauth.isTokenValid(token) || token === this.config.apiKey;
       },
@@ -76,7 +77,7 @@ export class BridgeServer {
     // Mount MCP endpoints
     publicApp.route('/', mcp.router);
     // Mount Views & Paste
-    const views = createViewsAndPasteRouter(this.engine);
+    const views = createViewsAndPasteRouter(this.engine, this.config.apiKey);
     publicApp.route('/', views);
 
     this.publicServer = serve({

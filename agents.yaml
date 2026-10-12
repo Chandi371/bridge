@@ -7,7 +7,15 @@ agents:
     expected_duration: "fast <10s"
     require_approval: false
 
-  - id: python-sample
+  - id: slow-agent
+    name: slow_agent
+    description: "Simulated 90s background data processing worker."
+    kind: command
+    command: "node -e \"setTimeout(() => { console.log('Finished slow job'); }, 90000)\""
+    expected_duration: "slow 1-3 min"
+    require_approval: false
+
+  - id: sample-python
     name: sample_py
     description: "A fast local Python script agent."
     kind: command

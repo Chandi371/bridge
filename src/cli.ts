@@ -16,14 +16,28 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin-secure-password';
 async function main() {
   const command = process.argv[2];
 
+  if (command === 'url') {
+    console.log(`\n=== Bridge URLs ===`);
+    console.log(`Public Base URL:  ${PUBLIC_BASE_URL}`);
+    console.log(`MCP Endpoint:     ${PUBLIC_BASE_URL}/mcp`);
+    console.log(`OpenAPI Spec:     ${PUBLIC_BASE_URL}/openapi.json`);
+    console.log(`Protected Res:    ${PUBLIC_BASE_URL}/.well-known/oauth-protected-resource`);
+    console.log(`OAuth Metadata:   ${PUBLIC_BASE_URL}/.well-known/oauth-authorization-server`);
+    console.log(`Local Dashboard:  http://127.0.0.1:${LOCAL_PORT}/admin\n`);
+    process.exit(0);
+  }
+
   if (command !== 'start') {
     console.log(`
-Usage: npm run bridge start
+Usage:
+  npm run bridge start   Start Bridge server, tunnels, and agents
+  npm run bridge url     Print current public, MCP, and OpenAPI URLs
 
 Options configured via .env:
   PUBLIC_PORT=${PUBLIC_PORT}
   LOCAL_PORT=${LOCAL_PORT}
   PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
+  TUNNEL_MODE=quick | named | ngrok
 `);
     process.exit(0);
   }
@@ -32,12 +46,19 @@ Options configured via .env:
   console.log('              STARTING BRIDGE SERVICE                ');
   console.log('=====================================================');
 
-  // Check Cloudflare Tunnel flag or quick tunnel
   let tunnelProc: any = null;
-  const isCloudflareQuick = process.env.CLOUDFLARE_TUNNEL_MODE === 'quick';
+  const tunnelMode = process.env.TUNNEL_MODE || (process.env.CLOUDFLARE_TUNNEL_MODE === 'quick' ? 'quick' : 'none');
 
-  if (isCloudflareQuick) {
-    console.log('[Tunnel] Launching Cloudflare quick tunnel to http://127.0.0.1:' + PUBLIC_PORT);
+  if (tunnelMode === 'quick') {
+    console.log('\n*****************************************************');
+    console.log('  WARNING: RUNNING IN QUICK TUNNEL MODE');
+    console.log('  The trycloudflare.com URL will change EVERY run.');
+    console.log('  This breaks OAuth and connector setups on restart.');
+    console.log('  For permanent production use, configure a named');
+    console.log('  Cloudflare tunnel or ngrok static domain.');
+    console.log('*****************************************************\n');
+
+    console.log(`[Tunnel] Launching Cloudflare quick tunnel to http://127.0.0.1:${PUBLIC_PORT}`);
     tunnelProc = spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${PUBLIC_PORT}`]);
 
     tunnelProc.stderr.on('data', (d: Buffer) => {
@@ -48,6 +69,16 @@ Options configured via .env:
         console.log(`[Tunnel] Quick Tunnel active at: ${PUBLIC_BASE_URL}`);
       }
     });
+  } else if (tunnelMode === 'named') {
+    const tunnelName = process.env.CLOUDFLARE_TUNNEL_NAME || 'bridge';
+    console.log(`[Tunnel] Starting named Cloudflare tunnel '${tunnelName}'...`);
+    tunnelProc = spawn('cloudflared', ['tunnel', 'run', tunnelName]);
+  } else if (tunnelMode === 'ngrok') {
+    const ngrokDomain = process.env.NGROK_DOMAIN;
+    console.log(`[Tunnel] Starting ngrok tunnel (domain: ${ngrokDomain || 'dynamic'})...`);
+    const args = ['http', `${PUBLIC_PORT}`];
+    if (ngrokDomain) args.push(`--domain=${ngrokDomain}`);
+    tunnelProc = spawn('ngrok', args);
   }
 
   // Start Bridge Server
@@ -90,7 +121,9 @@ Options configured via .env:
   console.log(`Public Base URL:  ${PUBLIC_BASE_URL}`);
   console.log(`MCP Endpoint:     ${PUBLIC_BASE_URL}/mcp`);
   console.log(`OpenAPI Spec:     ${PUBLIC_BASE_URL}/openapi.json`);
-  console.log(`Copy-Paste View:  ${PUBLIC_BASE_URL}/paste`);
+  console.log(`Protected Res:    ${PUBLIC_BASE_URL}/.well-known/oauth-protected-resource`);
+  console.log(`OAuth Metadata:   ${PUBLIC_BASE_URL}/.well-known/oauth-authorization-server`);
+  console.log(`Copy-Paste View:  ${PUBLIC_BASE_URL}/paste?key=${API_KEY}`);
   console.log(`Local Dashboard:  http://127.0.0.1:${LOCAL_PORT}/admin`);
   console.log(`Agent Hub (WS):   ws://127.0.0.1:${LOCAL_PORT}/agent/ws`);
   console.log(`API Key header:   Authorization: Bearer ${API_KEY}`);

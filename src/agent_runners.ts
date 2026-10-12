@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import crypto from 'crypto';
 import { BridgeDatabase } from './db.js';
 import { BridgeAgentNode } from './sdk.js';
 
@@ -35,8 +36,7 @@ export class ExternalAgentRunner {
 
   public registerAndStartCommandAgent(cfg: CommandAgentConfig, token: string) {
     // Upsert into DB
-    const tokenHash = this.db.db.prepare('SELECT 1').get() ? 
-      require('crypto').createHash('sha256').update(token).digest('hex') : '';
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
     this.db.upsertAgent({
       id: cfg.id,
@@ -98,7 +98,7 @@ export class ExternalAgentRunner {
   }
 
   public registerAndStartWebhookAgent(cfg: WebhookAgentConfig, token: string) {
-    const tokenHash = require('crypto').createHash('sha256').update(token).digest('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
     this.db.upsertAgent({
       id: cfg.id,

@@ -17,6 +17,34 @@ export interface AuthCode {
   expires_at: number;
 }
 
+export interface TokenRecord {
+  token: string;
+  client_id: string;
+  expires_at: number;
+}
+
+export interface RefreshTokenRecord {
+  refresh_token: string;
+  client_id: string;
+  expires_at: number;
+}
+
+// Officially documented OAuth callback patterns for Claude and ChatGPT Custom Actions:
+// Claude AI MCP: https://claude.ai/api/mcp/auth_callback, https://claude.ai/oauth/callback
+// ChatGPT Custom Actions: https://chat.openai.com/aip/plugin-*/oauth/callback, https://chatgpt.com/aip/*/oauth/callback
+export const DOCUMENTED_REDIRECT_URI_PATTERNS = [
+  /^https:\/\/(?:[a-zA-Z0-9-]+\.)?claude\.ai\/.*/,
+  /^https:\/\/(?:[a-zA-Z0-9-]+\.)?anthropic\.com\/.*/,
+  /^https:\/\/(?:[a-zA-Z0-9-]+\.)?openai\.com\/.*/,
+  /^https:\/\/(?:[a-zA-Z0-9-]+\.)?chatgpt\.com\/.*/,
+  /^http:\/\/localhost(?::\d+)?\/.*/,
+  /^http:\/\/127\.0\.0\.1(?::\d+)?\/.*/,
+];
+
+export function isRedirectUriAllowed(uri: string): boolean {
+  return DOCUMENTED_REDIRECT_URI_PATTERNS.some((pattern) => pattern.test(uri));
+}
+
 export function createOAuthRouter(options: {
   publicBaseUrl: string;
   adminPassword?: string;
@@ -24,16 +52,27 @@ export function createOAuthRouter(options: {
   const router = new Hono();
   const clients = new Map<string, OAuthClient>();
   const authCodes = new Map<string, AuthCode>();
-  const accessTokens = new Set<string>();
+  const accessTokens = new Map<string, TokenRecord>();
+  const refreshTokens = new Map<string, RefreshTokenRecord>();
 
-  // Helper: verify PKCE S256 or plain
   function verifyPkce(verifier: string, challenge: string, method = 'S256'): boolean {
     if (method === 'plain') return verifier === challenge;
     const computed = crypto.createHash('sha256').update(verifier).digest('base64url');
     return computed === challenge;
   }
 
-  // 1. Well-known OAuth Authorization Server Metadata (RFC 8414)
+  // RFC 9728: OAuth 2.0 Protected Resource Metadata
+  router.get('/.well-known/oauth-protected-resource', (c) => {
+    const base = options.publicBaseUrl.replace(/\/+$/, '');
+    return c.json({
+      resource: `${base}/mcp`,
+      authorization_servers: [base],
+      scopes_supported: ['tools', 'mcp'],
+      bearer_methods_supported: ['header'],
+    });
+  });
+
+  // RFC 8414: OAuth 2.0 Authorization Server Metadata
   router.get('/.well-known/oauth-authorization-server', (c) => {
     const base = options.publicBaseUrl.replace(/\/+$/, '');
     return c.json({
@@ -41,23 +80,37 @@ export function createOAuthRouter(options: {
       authorization_endpoint: `${base}/oauth/authorize`,
       token_endpoint: `${base}/oauth/token`,
       registration_endpoint: `${base}/oauth/register`,
+      revocation_endpoint: `${base}/oauth/revoke`,
       response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code'],
+      grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256', 'plain'],
       token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
+      revocation_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
     });
   });
 
-  // 2. Dynamic Client Registration (RFC 7591)
+  // RFC 7591: Dynamic Client Registration
   router.post('/oauth/register', async (c) => {
     try {
       const body = await c.req.json();
+      const redirectUris: string[] = body.redirect_uris || [];
+
+      // Validate redirect URIs
+      for (const uri of redirectUris) {
+        if (!isRedirectUriAllowed(uri)) {
+          return c.json({
+            error: 'invalid_redirect_uri',
+            error_description: `Redirect URI '${uri}' is not permitted by allow-list.`,
+          }, 400);
+        }
+      }
+
       const clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const clientSecret = crypto.randomBytes(16).toString('hex');
       const client: OAuthClient = {
         client_id: clientId,
         client_secret: clientSecret,
-        redirect_uris: body.redirect_uris || [],
+        redirect_uris: redirectUris,
         client_name: body.client_name || 'Claude / Custom Client',
       };
       clients.set(clientId, client);
@@ -73,7 +126,7 @@ export function createOAuthRouter(options: {
     }
   });
 
-  // 3. Authorization Endpoint
+  // Authorization Endpoint
   router.get('/oauth/authorize', (c) => {
     const clientId = c.req.query('client_id');
     const redirectUri = c.req.query('redirect_uri');
@@ -85,7 +138,10 @@ export function createOAuthRouter(options: {
       return c.text('Missing client_id or redirect_uri', 400);
     }
 
-    // Minimal single-user approval / login screen
+    if (!isRedirectUriAllowed(redirectUri)) {
+      return c.text('Unauthorized redirect_uri', 400);
+    }
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -152,47 +208,103 @@ export function createOAuthRouter(options: {
     return c.redirect(target.toString(), 302);
   });
 
-  // 4. Token Endpoint
+  // Token Endpoint (authorization_code and refresh_token)
   router.post('/oauth/token', async (c) => {
     try {
       const body = await c.req.parseBody();
       const grantType = body.grant_type;
-      const code = body.code as string;
-      const redirectUri = body.redirect_uri as string;
-      const clientId = body.client_id as string;
-      const codeVerifier = body.code_verifier as string;
 
-      if (grantType !== 'authorization_code') {
+      if (grantType === 'authorization_code') {
+        const code = body.code as string;
+        const codeVerifier = body.code_verifier as string;
+
+        const authCode = authCodes.get(code);
+        if (!authCode || Date.now() > authCode.expires_at) {
+          return c.json({ error: 'invalid_grant', error_description: 'Code expired or invalid' }, 400);
+        }
+
+        if (authCode.code_challenge) {
+          if (!codeVerifier || !verifyPkce(codeVerifier, authCode.code_challenge, authCode.code_challenge_method)) {
+            return c.json({ error: 'invalid_grant', error_description: 'PKCE challenge verification failed' }, 400);
+          }
+        }
+
+        authCodes.delete(code);
+        const accessToken = `mcp_token_${crypto.randomBytes(24).toString('hex')}`;
+        const refreshToken = `mcp_refresh_${crypto.randomBytes(24).toString('hex')}`;
+        const now = Date.now();
+
+        accessTokens.set(accessToken, {
+          token: accessToken,
+          client_id: authCode.client_id,
+          expires_at: now + 3600 * 1000, // 1 hour expiry
+        });
+
+        refreshTokens.set(refreshToken, {
+          refresh_token: refreshToken,
+          client_id: authCode.client_id,
+          expires_at: now + 86400 * 30 * 1000, // 30 days
+        });
+
+        return c.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          refresh_token: refreshToken,
+        });
+      } else if (grantType === 'refresh_token') {
+        const refreshToken = body.refresh_token as string;
+        const record = refreshTokens.get(refreshToken);
+        if (!record || Date.now() > record.expires_at) {
+          return c.json({ error: 'invalid_grant', error_description: 'Invalid or expired refresh token' }, 400);
+        }
+
+        const newAccessToken = `mcp_token_${crypto.randomBytes(24).toString('hex')}`;
+        const now = Date.now();
+        accessTokens.set(newAccessToken, {
+          token: newAccessToken,
+          client_id: record.client_id,
+          expires_at: now + 3600 * 1000,
+        });
+
+        return c.json({
+          access_token: newAccessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+        });
+      } else {
         return c.json({ error: 'unsupported_grant_type' }, 400);
       }
-
-      const authCode = authCodes.get(code);
-      if (!authCode || Date.now() > authCode.expires_at) {
-        return c.json({ error: 'invalid_grant', error_description: 'Code expired or invalid' }, 400);
-      }
-
-      if (authCode.code_challenge) {
-        if (!codeVerifier || !verifyPkce(codeVerifier, authCode.code_challenge, authCode.code_challenge_method)) {
-          return c.json({ error: 'invalid_grant', error_description: 'PKCE challenge verification failed' }, 400);
-        }
-      }
-
-      authCodes.delete(code);
-      const token = `mcp_token_${crypto.randomBytes(24).toString('hex')}`;
-      accessTokens.add(token);
-
-      return c.json({
-        access_token: token,
-        token_type: 'Bearer',
-        expires_in: 86400 * 30, // 30 days
-      });
     } catch (e: any) {
       return c.json({ error: 'invalid_request', error_description: e.message }, 400);
     }
   });
 
+  // RFC 7009: Token Revocation
+  router.post('/oauth/revoke', async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const token = body.token as string;
+      if (token) {
+        accessTokens.delete(token);
+        refreshTokens.delete(token);
+      }
+      return c.json({ status: 'revoked' }, 200);
+    } catch (e: any) {
+      return c.json({ error: 'invalid_request' }, 400);
+    }
+  });
+
   return {
     router,
-    isTokenValid: (token: string) => accessTokens.has(token),
+    isTokenValid: (token: string) => {
+      const record = accessTokens.get(token);
+      if (!record) return false;
+      return Date.now() < record.expires_at;
+    },
+    revokeToken: (token: string) => {
+      accessTokens.delete(token);
+      refreshTokens.delete(token);
+    },
   };
 }
