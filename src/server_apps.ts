@@ -5,7 +5,7 @@ import { createRestRouter } from './rest_adapter.js';
 export interface PublicServerOptions {
   engine: BridgeEngine;
   apiKey?: string;
-  publicBaseUrl?: string;
+  publicBaseUrl?: string | (() => string);
   rateLimitPerMin?: number;
   maxPromptSizeBytes?: number;
 }
@@ -27,7 +27,12 @@ export function createPublicApp(options: PublicServerOptions) {
     } else {
       record.count++;
       if (record.count > limitPerMin) {
-        return c.json({ error: 'Too many requests. Rate limit exceeded.' }, 429);
+        const secondsToWait = Math.ceil((record.resetAt - now) / 1000);
+        return c.json({
+          error: 'Too many requests. Rate limit exceeded.',
+          retry_after_seconds: secondsToWait,
+          next_step: `Rate limit exceeded. Please wait ${secondsToWait} seconds before calling this tool again.`,
+        }, 429);
       }
     }
     await next();
@@ -42,8 +47,8 @@ export function createPublicApp(options: PublicServerOptions) {
     await next();
   });
 
-  // REST API and OpenAPI
-  const restRouter = createRestRouter(options.engine, options.apiKey);
+  // REST API and OpenAPI (servers[].url set to publicBaseUrl)
+  const restRouter = createRestRouter(options.engine, options.apiKey, options.publicBaseUrl);
   app.route('/', restRouter);
 
   // Health check for tunnel and launcher

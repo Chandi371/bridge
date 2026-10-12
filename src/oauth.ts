@@ -12,8 +12,8 @@ export interface AuthCode {
   code: string;
   client_id: string;
   redirect_uri: string;
-  code_challenge?: string;
-  code_challenge_method?: string;
+  code_challenge: string;
+  code_challenge_method: string;
   expires_at: number;
 }
 
@@ -29,9 +29,9 @@ export interface RefreshTokenRecord {
   expires_at: number;
 }
 
-// Officially documented OAuth callback patterns for Claude and ChatGPT Custom Actions:
-// Claude AI MCP: https://claude.ai/api/mcp/auth_callback, https://claude.ai/oauth/callback
-// ChatGPT Custom Actions: https://chat.openai.com/aip/plugin-*/oauth/callback, https://chatgpt.com/aip/*/oauth/callback
+// Officially documented OAuth callback patterns for Claude and ChatGPT:
+// Claude AI MCP custom connectors: https://claude.ai/api/mcp/auth_callback, https://claude.ai/oauth/callback
+// ChatGPT Custom Actions & MCP: https://chat.openai.com/aip/plugin-*/oauth/callback, https://chatgpt.com/aip/*/oauth/callback
 export const DOCUMENTED_REDIRECT_URI_PATTERNS = [
   /^https:\/\/(?:[a-zA-Z0-9-]+\.)?claude\.ai\/.*/,
   /^https:\/\/(?:[a-zA-Z0-9-]+\.)?anthropic\.com\/.*/,
@@ -46,7 +46,7 @@ export function isRedirectUriAllowed(uri: string): boolean {
 }
 
 export function createOAuthRouter(options: {
-  publicBaseUrl: string;
+  publicBaseUrl: string | (() => string);
   adminPassword?: string;
 }) {
   const router = new Hono();
@@ -55,15 +55,22 @@ export function createOAuthRouter(options: {
   const accessTokens = new Map<string, TokenRecord>();
   const refreshTokens = new Map<string, RefreshTokenRecord>();
 
-  function verifyPkce(verifier: string, challenge: string, method = 'S256'): boolean {
-    if (method === 'plain') return verifier === challenge;
+  // Login attempt tracking & lockout (max 5 failed attempts -> 15 min lockout)
+  const loginAttempts = new Map<string, { attempts: number; lockoutUntil: number }>();
+
+  function getBaseUrl(): string {
+    const raw = typeof options.publicBaseUrl === 'function' ? options.publicBaseUrl() : options.publicBaseUrl;
+    return raw.replace(/\/+$/, '');
+  }
+
+  function verifyPkceS256(verifier: string, challenge: string): boolean {
     const computed = crypto.createHash('sha256').update(verifier).digest('base64url');
     return computed === challenge;
   }
 
   // RFC 9728: OAuth 2.0 Protected Resource Metadata
   router.get('/.well-known/oauth-protected-resource', (c) => {
-    const base = options.publicBaseUrl.replace(/\/+$/, '');
+    const base = getBaseUrl();
     return c.json({
       resource: `${base}/mcp`,
       authorization_servers: [base],
@@ -72,9 +79,9 @@ export function createOAuthRouter(options: {
     });
   });
 
-  // RFC 8414: OAuth 2.0 Authorization Server Metadata
+  // RFC 8414: OAuth 2.0 Authorization Server Metadata (S256 only)
   router.get('/.well-known/oauth-authorization-server', (c) => {
-    const base = options.publicBaseUrl.replace(/\/+$/, '');
+    const base = getBaseUrl();
     return c.json({
       issuer: base,
       authorization_endpoint: `${base}/oauth/authorize`,
@@ -83,7 +90,7 @@ export function createOAuthRouter(options: {
       revocation_endpoint: `${base}/oauth/revoke`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
-      code_challenge_methods_supported: ['S256', 'plain'],
+      code_challenge_methods_supported: ['S256'],
       token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
       revocation_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
     });
@@ -142,6 +149,11 @@ export function createOAuthRouter(options: {
       return c.text('Unauthorized redirect_uri', 400);
     }
 
+    // Require PKCE and reject anything other than S256
+    if (!codeChallenge || codeChallengeMethod !== 'S256') {
+      return c.text('PKCE S256 is required. Plain or missing code challenge is rejected.', 400);
+    }
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -165,10 +177,10 @@ export function createOAuthRouter(options: {
             <input type="hidden" name="client_id" value="${clientId}">
             <input type="hidden" name="redirect_uri" value="${redirectUri}">
             <input type="hidden" name="state" value="${state}">
-            <input type="hidden" name="code_challenge" value="${codeChallenge || ''}">
+            <input type="hidden" name="code_challenge" value="${codeChallenge}">
             <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod}">
             <label>Master Password:</label>
-            <input type="password" name="password" placeholder="Enter password..." required autofocus>
+            <input type="password" name="password" placeholder="Enter password (min 16 chars)..." required autofocus>
             <button type="submit">Approve Connection</button>
           </form>
         </div>
@@ -187,9 +199,34 @@ export function createOAuthRouter(options: {
     const codeChallengeMethod = (body.code_challenge_method as string) || 'S256';
     const password = body.password as string;
 
-    if (options.adminPassword && password !== options.adminPassword) {
-      return c.text('Invalid Master Password', 403);
+    const ip = c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || 'client';
+    const now = Date.now();
+    const attempt = loginAttempts.get(ip) || { attempts: 0, lockoutUntil: 0 };
+
+    if (now < attempt.lockoutUntil) {
+      const waitSec = Math.ceil((attempt.lockoutUntil - now) / 1000);
+      return c.text(`Account locked due to too many failed attempts. Try again in ${waitSec} seconds.`, 429);
     }
+
+    // Require PKCE S256
+    if (!codeChallenge || codeChallengeMethod !== 'S256') {
+      return c.text('PKCE S256 is required. Plain code challenge is rejected.', 400);
+    }
+
+    if (!options.adminPassword || password !== options.adminPassword) {
+      attempt.attempts++;
+      if (attempt.attempts >= 5) {
+        attempt.lockoutUntil = now + 15 * 60 * 1000; // 15 min lockout
+        loginAttempts.set(ip, attempt);
+        return c.text('Account locked due to too many failed attempts. Locked for 15 minutes.', 429);
+      }
+      loginAttempts.set(ip, attempt);
+      const remaining = 5 - attempt.attempts;
+      return c.text(`Invalid Master Password. ${remaining} attempt(s) remaining before lockout.`, 403);
+    }
+
+    // Successful login: reset attempts
+    loginAttempts.delete(ip);
 
     const code = `code_${crypto.randomBytes(16).toString('hex')}`;
     authCodes.set(code, {
@@ -197,7 +234,7 @@ export function createOAuthRouter(options: {
       client_id: clientId,
       redirect_uri: redirectUri,
       code_challenge: codeChallenge,
-      code_challenge_method: codeChallengeMethod,
+      code_challenge_method: 'S256',
       expires_at: Date.now() + 300000, // 5 min
     });
 
@@ -223,10 +260,9 @@ export function createOAuthRouter(options: {
           return c.json({ error: 'invalid_grant', error_description: 'Code expired or invalid' }, 400);
         }
 
-        if (authCode.code_challenge) {
-          if (!codeVerifier || !verifyPkce(codeVerifier, authCode.code_challenge, authCode.code_challenge_method)) {
-            return c.json({ error: 'invalid_grant', error_description: 'PKCE challenge verification failed' }, 400);
-          }
+        // S256 verification
+        if (!codeVerifier || !verifyPkceS256(codeVerifier, authCode.code_challenge)) {
+          return c.json({ error: 'invalid_grant', error_description: 'PKCE S256 verification failed' }, 400);
         }
 
         authCodes.delete(code);

@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { BridgeEngine } from './engine.js';
 
-export function createDashboardRouter(engine: BridgeEngine, publicBaseUrl: string) {
+export function createDashboardRouter(engine: BridgeEngine, publicBaseUrl: string | (() => string)) {
   const router = new Hono();
 
   router.get('/admin', (c) => {
-    const agents = engine.listAgents();
+    const rawUrl = typeof publicBaseUrl === 'function' ? publicBaseUrl() : publicBaseUrl;
+    const agents = engine.db.listAgents();
     const rooms = engine.db.db.prepare('SELECT * FROM rooms ORDER BY updated_at DESC LIMIT 15').all();
     const tasks = engine.db.db.prepare('SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 15').all();
     const approvals = engine.db.db.prepare("SELECT * FROM approvals WHERE status = 'pending'").all();
@@ -40,7 +41,7 @@ export function createDashboardRouter(engine: BridgeEngine, publicBaseUrl: strin
             <p style="color: #94a3b8; margin: 0.25rem 0 0 0;">Bound exclusively to 127.0.0.1</p>
           </div>
           <div>
-            <strong>Public Base URL:</strong> <a href="${publicBaseUrl}" target="_blank" style="color: #38bdf8;">${publicBaseUrl}</a>
+            <strong>Public Base URL:</strong> <a href="${rawUrl}" target="_blank" style="color: #38bdf8;">${rawUrl}</a>
           </div>
         </div>
 

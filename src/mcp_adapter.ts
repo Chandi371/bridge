@@ -7,11 +7,16 @@ import { BridgeEngine } from './engine.js';
 
 export function createMcpRouter(options: {
   engine: BridgeEngine;
-  publicBaseUrl: string;
+  publicBaseUrl: string | (() => string);
   isTokenAuthorized: (token: string) => boolean;
 }) {
   const router = new Hono();
   const sessions = new Map<string, { server: Server; transport: SSEServerTransport; createdAt: number }>();
+
+  const getBase = () => {
+    const raw = typeof options.publicBaseUrl === 'function' ? options.publicBaseUrl() : options.publicBaseUrl;
+    return raw.replace(/\/+$/, '');
+  };
 
   // Token Auth Middleware for /mcp and /mcp/*
   router.use('/mcp', async (c, next) => {
@@ -26,7 +31,7 @@ export function createMcpRouter(options: {
     const token = authHeader?.replace(/^Bearer\s+/i, '');
 
     if (!token || !options.isTokenAuthorized(token)) {
-      const base = options.publicBaseUrl.replace(/\/+$/, '');
+      const base = getBase();
       const metadataUrl = `${base}/.well-known/oauth-protected-resource`;
       c.header('WWW-Authenticate', `Bearer resource_metadata="${metadataUrl}"`);
       return c.json({ error: 'Unauthorized MCP access' }, 401);
@@ -39,7 +44,8 @@ export function createMcpRouter(options: {
     const accept = c.req.header('Accept') || '';
     if (accept.includes('text/event-stream')) {
       const sessionId = `mcp_sess_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-      const sseContent = `event: endpoint\ndata: ${options.publicBaseUrl}/mcp/messages?sessionId=${sessionId}\n\n`;
+      const base = getBase();
+      const sseContent = `event: endpoint\ndata: ${base}/mcp/messages?sessionId=${sessionId}\n\n`;
       return new Response(sseContent, {
         status: 200,
         headers: {
@@ -51,11 +57,12 @@ export function createMcpRouter(options: {
       });
     }
 
+    const base = getBase();
     return c.json({
       status: 'ready',
       transport: 'Streamable HTTP / SSE',
-      endpoint: `${options.publicBaseUrl}/mcp`,
-      messages_endpoint: `${options.publicBaseUrl}/mcp/messages`,
+      endpoint: `${base}/mcp`,
+      messages_endpoint: `${base}/mcp/messages`,
     });
   });
 
@@ -120,7 +127,7 @@ export function createMcpRouter(options: {
         tools: [
           {
             name: 'list_agents',
-            description: 'List available agents, capabilities, and online status.',
+            description: 'Call this first. Returns registered agents with capability tags, duration expectations, and online status.',
             inputSchema: {
               type: 'object',
               properties: {},
@@ -128,7 +135,7 @@ export function createMcpRouter(options: {
           },
           {
             name: 'send',
-            description: 'Send a message or start a task. Waits up to wait_seconds (max 28).',
+            description: "Dispatches a message/task to an agent or participant. Waits up to wait_seconds (max 28s). If status is 'running', call listen with task_id until done; do not answer the user before then.",
             inputSchema: {
               type: 'object',
               properties: {
@@ -144,7 +151,7 @@ export function createMcpRouter(options: {
           },
           {
             name: 'listen',
-            description: 'Long-poll for task updates or messages (max 28s).',
+            description: "Waits up to wait_seconds (max 28s) for task results, progress, or incoming messages. If status is 'running', call listen with task_id until done; do not answer the user before then.",
             inputSchema: {
               type: 'object',
               properties: {

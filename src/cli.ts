@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { spawn } from 'child_process';
 import YAML from 'yaml';
 import dotenv from 'dotenv';
@@ -11,7 +12,36 @@ const PUBLIC_PORT = parseInt(process.env.PUBLIC_PORT || '3000', 10);
 const LOCAL_PORT = parseInt(process.env.LOCAL_PORT || '3001', 10);
 let PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PUBLIC_PORT}`;
 const API_KEY = process.env.BRIDGE_API_KEY || 'test-bridge-api-key-secret-123';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin-secure-password';
+
+// Enforce admin password security: require >= 16 chars or auto-generate on first run
+let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const envPath = path.resolve(process.cwd(), '.env');
+
+if (!ADMIN_PASSWORD || ADMIN_PASSWORD.trim() === '') {
+  const generatedPassword = crypto.randomBytes(18).toString('base64url');
+  ADMIN_PASSWORD = generatedPassword;
+  console.log('\n================================================================');
+  console.log(' [SECURITY] No ADMIN_PASSWORD found. Auto-generated secure password:');
+  console.log(` >>> ${ADMIN_PASSWORD} <<<`);
+  console.log(' This password has been saved to your .env file.');
+  console.log('================================================================\n');
+
+  if (fs.existsSync(envPath)) {
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    if (/^ADMIN_PASSWORD=/m.test(envContent)) {
+      envContent = envContent.replace(/^ADMIN_PASSWORD=.*$/m, `ADMIN_PASSWORD=${ADMIN_PASSWORD}`);
+    } else {
+      envContent += `\nADMIN_PASSWORD=${ADMIN_PASSWORD}\n`;
+    }
+    fs.writeFileSync(envPath, envContent, 'utf8');
+  } else {
+    fs.writeFileSync(envPath, `ADMIN_PASSWORD=${ADMIN_PASSWORD}\n`, 'utf8');
+  }
+} else if (ADMIN_PASSWORD.length < 16) {
+  console.error('\n[FATAL SECURITY ERROR] ADMIN_PASSWORD must be at least 16 characters long.');
+  console.error(`Current length is ${ADMIN_PASSWORD.length}. Please update your .env file.`);
+  process.exit(1);
+}
 
 async function main() {
   const command = process.argv[2];
@@ -45,6 +75,18 @@ Options configured via .env:
   console.log('=====================================================');
   console.log('              STARTING BRIDGE SERVICE                ');
   console.log('=====================================================');
+
+  // Start Bridge Server with dynamic URL getter
+  const server = new BridgeServer({
+    publicPort: PUBLIC_PORT,
+    localPort: LOCAL_PORT,
+    publicBaseUrl: () => PUBLIC_BASE_URL,
+    apiKey: API_KEY,
+    adminPassword: ADMIN_PASSWORD,
+    dbPath: process.env.DB_PATH || './bridge.sqlite',
+  });
+
+  await server.start();
 
   let tunnelProc: any = null;
   const tunnelMode = process.env.TUNNEL_MODE || (process.env.CLOUDFLARE_TUNNEL_MODE === 'quick' ? 'quick' : 'none');
@@ -80,18 +122,6 @@ Options configured via .env:
     if (ngrokDomain) args.push(`--domain=${ngrokDomain}`);
     tunnelProc = spawn('ngrok', args);
   }
-
-  // Start Bridge Server
-  const server = new BridgeServer({
-    publicPort: PUBLIC_PORT,
-    localPort: LOCAL_PORT,
-    publicBaseUrl: PUBLIC_BASE_URL,
-    apiKey: API_KEY,
-    adminPassword: ADMIN_PASSWORD,
-    dbPath: process.env.DB_PATH || './bridge.sqlite',
-  });
-
-  await server.start();
 
   // Load agents.yaml
   const agentsPath = path.resolve(process.cwd(), 'agents.yaml');

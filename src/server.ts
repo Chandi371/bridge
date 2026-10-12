@@ -14,7 +14,7 @@ import { ExternalAgentRunner } from './agent_runners.js';
 export interface BridgeConfig {
   publicPort: number;
   localPort: number;
-  publicBaseUrl: string;
+  publicBaseUrl: string | (() => string);
   apiKey: string;
   adminPassword?: string;
   dbPath?: string;
@@ -41,6 +41,14 @@ export class BridgeServer {
     this.runner = new ExternalAgentRunner(this.db, `ws://127.0.0.1:${config.localPort}/agent/ws`);
   }
 
+  public getPublicBaseUrl(): string {
+    return typeof this.config.publicBaseUrl === 'function' ? this.config.publicBaseUrl() : this.config.publicBaseUrl;
+  }
+
+  public setPublicBaseUrl(url: string): void {
+    this.config.publicBaseUrl = url;
+  }
+
   public async start(): Promise<void> {
     // 1. Recover any tasks interrupted in previous run
     const recovered = this.db.recoverDanglingTasks();
@@ -50,14 +58,14 @@ export class BridgeServer {
 
     // 2. Setup OAuth router
     const oauth = createOAuthRouter({
-      publicBaseUrl: this.config.publicBaseUrl,
+      publicBaseUrl: () => this.getPublicBaseUrl(),
       adminPassword: this.config.adminPassword,
     });
 
     // 3. Setup MCP router
     const mcp = createMcpRouter({
       engine: this.engine,
-      publicBaseUrl: this.config.publicBaseUrl,
+      publicBaseUrl: () => this.getPublicBaseUrl(),
       isTokenAuthorized: (token) => {
         return oauth.isTokenValid(token) || token === this.config.apiKey;
       },
@@ -67,7 +75,7 @@ export class BridgeServer {
     const publicApp = createPublicApp({
       engine: this.engine,
       apiKey: this.config.apiKey,
-      publicBaseUrl: this.config.publicBaseUrl,
+      publicBaseUrl: () => this.getPublicBaseUrl(),
       rateLimitPerMin: this.config.rateLimitPerMin,
       maxPromptSizeBytes: this.config.maxPromptSizeBytes,
     });
@@ -90,7 +98,7 @@ export class BridgeServer {
       engine: this.engine,
       adminPassword: this.config.adminPassword,
     });
-    const dashboard = createDashboardRouter(this.engine, this.config.publicBaseUrl);
+    const dashboard = createDashboardRouter(this.engine, () => this.getPublicBaseUrl());
     localApp.route('/', dashboard);
 
     this.localServer = serve({

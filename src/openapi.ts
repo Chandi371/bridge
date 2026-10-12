@@ -7,12 +7,8 @@ export const openApiSpec = {
   },
   servers: [
     {
-      url: "{public_base_url}",
-      variables: {
-        public_base_url: {
-          default: "http://localhost:3000"
-        }
-      }
+      url: "http://localhost:3000",
+      description: "Bridge Public Server"
     }
   ],
   paths: {
@@ -20,26 +16,26 @@ export const openApiSpec = {
       get: {
         operationId: "list_agents",
         summary: "List all available agents and their status",
-        description: "Returns registered agents with capability tags, duration expectations, and online status.",
+        description: "Call this first. Returns registered agents with capability tags, duration expectations, and online status.",
         responses: {
           "200": {
-            description: "Agent list",
-            content: {
+            "description": "Agent list",
+            "content": {
               "application/json": {
-                schema: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      name: { type: "string" },
-                      description: { type: "string" },
-                      capabilities: { type: "array", items: { type: "string" } },
-                      expected_duration: { type: "string" },
-                      online: { type: "boolean" },
-                      last_seen: { type: ["number", "null"] }
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string" },
+                      "name": { "type": "string" },
+                      "description": { "type": "string" },
+                      "capabilities": { "type": "array", "items": { "type": "string" } },
+                      "expected_duration": { "type": "string" },
+                      "online": { "type": "boolean" },
+                      "last_seen": { "type": ["number", "null"] }
                     },
-                    required: ["id", "name", "description", "capabilities", "expected_duration", "online"]
+                    "required": ["id", "name", "description", "capabilities", "expected_duration", "online"]
                   }
                 }
               }
@@ -52,41 +48,41 @@ export const openApiSpec = {
       post: {
         operationId: "send",
         summary: "Send a message or start a task",
-        description: "Dispatches a message/task to an agent or participant. Waits up to wait_seconds (max 28s).",
+        description: "Dispatches a message/task to an agent or participant. Waits up to wait_seconds (max 28s). If status is 'running', call listen with task_id until done; do not answer the user before then.",
         requestBody: {
           required: true,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  to: { type: "string", description: "Agent or participant name" },
-                  content: { type: "string", description: "Message prompt or reply" },
-                  room_id: { type: "string", description: "Optional room ID" },
-                  reply_to: { type: "string", description: "Optional message ID being answered" },
-                  client_request_id: { type: "string", description: "Optional client idempotency ID" },
-                  wait_seconds: { type: "number", default: 25, maximum: 28, description: "Wait seconds (max 28)" }
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": { "type": "string", "description": "Agent or participant name" },
+                  "content": { "type": "string", "description": "Message prompt or reply" },
+                  "room_id": { "type": "string", "description": "Optional room ID" },
+                  "reply_to": { "type": "string", "description": "Optional message ID being answered" },
+                  "client_request_id": { "type": "string", "description": "Optional client idempotency ID" },
+                  "wait_seconds": { "type": "number", "default": 25, "maximum": 28, "description": "Wait seconds (max 28)" }
                 },
-                required: ["to", "content"]
+                "required": ["to", "content"]
               }
             }
           }
         },
         responses: {
           "200": {
-            description: "Task or message status",
-            content: {
+            "description": "Task or message status",
+            "content": {
               "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    room_id: { type: "string" },
-                    task_id: { type: "string" },
-                    status: { type: "string" },
-                    messages: { type: "array" },
-                    next_step: { type: "string" }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "room_id": { "type": "string" },
+                    "task_id": { "type": "string" },
+                    "status": { "type": "string" },
+                    "messages": { "type": "array" },
+                    "next_step": { "type": "string" }
                   },
-                  required: ["room_id", "status", "messages", "next_step"]
+                  "required": ["room_id", "status", "messages", "next_step"]
                 }
               }
             }
@@ -98,18 +94,18 @@ export const openApiSpec = {
       post: {
         operationId: "listen",
         summary: "Long-poll for task updates or room activity",
-        description: "Waits up to wait_seconds (max 28s) for task results, progress, or incoming messages.",
+        description: "Waits up to wait_seconds (max 28s) for task results, progress, or incoming messages. If status is 'running', call listen with task_id until done; do not answer the user before then.",
         requestBody: {
           required: true,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  room_id: { type: "string" },
-                  task_id: { type: "string" },
-                  wait_seconds: { type: "number", default: 25, maximum: 28 },
-                  cursor: { type: "number" }
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "room_id": { "type": "string" },
+                  "task_id": { "type": "string" },
+                  "wait_seconds": { "type": "number", "default": 25, "maximum": 28 },
+                  "cursor": { "type": "number" }
                 }
               }
             }
@@ -117,21 +113,21 @@ export const openApiSpec = {
         },
         responses: {
           "200": {
-            description: "Listen poll result",
-            content: {
+            "description": "Listen poll result",
+            "content": {
               "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    status: { type: "string" },
-                    messages: { type: "array" },
-                    progress: { type: ["object", "null"] },
-                    partial_output: { type: ["string", "null"] },
-                    truncated: { type: "boolean" },
-                    cursor: { type: "number" },
-                    next_step: { type: "string" }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "messages": { "type": "array" },
+                    "progress": { "type": ["object", "null"] },
+                    "partial_output": { "type": ["string", "null"] },
+                    "truncated": { "type": "boolean" },
+                    "cursor": { "type": "number" },
+                    "next_step": { "type": "string" }
                   },
-                  required: ["status", "messages", "truncated", "next_step"]
+                  "required": ["status", "messages", "truncated", "next_step"]
                 }
               }
             }
@@ -160,18 +156,18 @@ export const openApiSpec = {
         ],
         responses: {
           "200": {
-            description: "Inbox summary",
-            content: {
+            "description": "Inbox summary",
+            "content": {
               "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    unanswered_questions: { type: "array" },
-                    recent_tasks: { type: "array" },
-                    recent_messages: { type: "array" },
-                    next_step: { type: "string" }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unanswered_questions": { "type": "array" },
+                    "recent_tasks": { "type": "array" },
+                    "recent_messages": { "type": "array" },
+                    "next_step": { "type": "string" }
                   },
-                  required: ["unanswered_questions", "recent_tasks", "recent_messages", "next_step"]
+                  "required": ["unanswered_questions", "recent_tasks", "recent_messages", "next_step"]
                 }
               }
             }
@@ -188,29 +184,29 @@ export const openApiSpec = {
           required: true,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  task_id: { type: "string" }
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "task_id": { "type": "string" }
                 },
-                required: ["task_id"]
+                "required": ["task_id"]
               }
             }
           }
         },
         responses: {
           "200": {
-            description: "Cancellation status",
-            content: {
+            "description": "Cancellation status",
+            "content": {
               "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    success: { type: "boolean" },
-                    task_id: { type: "string" },
-                    message: { type: "string" }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "task_id": { "type": "string" },
+                    "message": { "type": "string" }
                   },
-                  required: ["success", "task_id", "message"]
+                  "required": ["success", "task_id", "message"]
                 }
               }
             }

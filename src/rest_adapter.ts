@@ -2,10 +2,14 @@ import { Hono } from 'hono';
 import { BridgeEngine } from './engine.js';
 import { openApiSpec } from './openapi.js';
 
-export function createRestRouter(engine: BridgeEngine, apiKey?: string) {
+export function createRestRouter(
+  engine: BridgeEngine,
+  apiKey?: string,
+  publicBaseUrl?: string | (() => string)
+) {
   const app = new Hono();
 
-  // Auth middleware for /api/*
+  // Auth middleware for /api/* (Accepts BOTH Authorization: Bearer <key> AND X-API-Key)
   app.use('/api/*', async (c, next) => {
     if (!apiKey) {
       return next();
@@ -20,9 +24,19 @@ export function createRestRouter(engine: BridgeEngine, apiKey?: string) {
     await next();
   });
 
-  // OpenAPI spec
+  // OpenAPI spec with servers[].url updated to the public URL
   app.get('/openapi.json', (c) => {
-    return c.json(openApiSpec);
+    const base = typeof publicBaseUrl === 'function' ? publicBaseUrl() : publicBaseUrl || 'http://localhost:3000';
+    const spec = {
+      ...openApiSpec,
+      servers: [
+        {
+          url: base.replace(/\/+$/, ''),
+          description: 'Bridge Public Server',
+        },
+      ],
+    };
+    return c.json(spec);
   });
 
   // 1. list_agents

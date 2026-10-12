@@ -152,4 +152,31 @@ describe('Phase 4: Two-Listener Split, Route Isolation, Rate Limits, and Approva
     expect(overview.approvals.length).toBe(1);
     expect(overview.approvals[0].status).toBe('pending');
   });
+
+  it('accepts both Authorization: Bearer and X-API-Key headers on REST endpoints', async () => {
+    // 1. Using Authorization: Bearer
+    const resBearer = await fetch(`http://localhost:${PUBLIC_PORT}/api/list_agents`, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+    expect(resBearer.status).toBe(200);
+
+    // 2. Using X-API-Key
+    const resApiKey = await fetch(`http://localhost:${PUBLIC_PORT}/api/list_agents`, {
+      headers: { 'X-API-Key': API_KEY },
+    });
+    expect(resApiKey.status).toBe(200);
+
+    // 3. Without any key
+    const resNoKey = await fetch(`http://localhost:${PUBLIC_PORT}/api/list_agents`);
+    expect(resNoKey.status).toBe(401);
+  });
+
+  it('serves /openapi.json with servers[].url reflecting the public base URL', async () => {
+    const res = await fetch(`http://localhost:${PUBLIC_PORT}/openapi.json`);
+    expect(res.status).toBe(200);
+    const spec = await res.json();
+    expect(spec.servers).toBeDefined();
+    expect(spec.servers.length).toBeGreaterThan(0);
+    expect(spec.servers[0].url).toContain('http');
+  });
 });
