@@ -97,6 +97,17 @@ export class BridgeDatabase {
         created_at INTEGER NOT NULL
       );
     `);
+
+    // Safe migrations for pre-existing databases
+    try {
+      this.db.exec('ALTER TABLE agents ADD COLUMN listening INTEGER NOT NULL DEFAULT 0');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE agents ADD COLUMN last_claim_at INTEGER');
+    } catch {}
+    try {
+      this.db.exec("ALTER TABLE agents ADD COLUMN kind TEXT NOT NULL DEFAULT 'sdk'");
+    } catch {}
   }
 
   // --- Agents ---

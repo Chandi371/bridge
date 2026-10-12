@@ -131,14 +131,31 @@ Options configured via .env:
     const parsed = YAML.parse(fileContent);
 
     if (parsed && Array.isArray(parsed.agents)) {
-      for (const agentDef of parsed.agents) {
-        const token = `token_${agentDef.id}_${Math.random().toString(36).substring(2, 7)}`;
+        const token = agentDef.token || `token_${agentDef.id}_${Math.random().toString(36).substring(2, 7)}`;
         if (agentDef.kind === 'command') {
           server.runner.registerAndStartCommandAgent(agentDef, token);
           console.log(`  -> Started Command Agent: [${agentDef.name}]`);
         } else if (agentDef.kind === 'webhook') {
           server.runner.registerAndStartWebhookAgent(agentDef, token);
           console.log(`  -> Started Webhook Agent: [${agentDef.name}]`);
+        } else if (agentDef.kind === 'listener') {
+          const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+          server.engine.db.upsertAgent({
+            id: agentDef.id,
+            name: agentDef.name,
+            description: agentDef.description,
+            capabilities: agentDef.capabilities || ['listener'],
+            expected_duration: agentDef.expected_duration || 'slow 1-3 min',
+            token_hash: tokenHash,
+            online: 0,
+            listening: 0,
+            last_claim_at: null,
+            kind: 'listener',
+            last_seen: null,
+            require_approval: agentDef.require_approval ? 1 : 0,
+            enabled: 1,
+          });
+          console.log(`  -> Registered Listener Agent: [${agentDef.name}] (Token: ${token})`);
         }
       }
     }
