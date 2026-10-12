@@ -1,0 +1,35 @@
+{
+  "name": "bridgy",
+  "version": "1.0.0",
+  "description": "Bidirectional bridge service connecting cloud chat models (Claude, ChatGPT) with local AI agents via tool calls",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bridge": "tsx src/cli.ts",
+    "start": "tsx src/cli.ts start"
+  },
+  "keywords": ["mcp", "llm", "claude", "chatgpt", "agents", "bridge"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "hono": "^4.6.14",
+    "ws": "^8.18.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.7",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
