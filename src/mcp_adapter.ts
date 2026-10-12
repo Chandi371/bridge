@@ -127,7 +127,7 @@ export function createMcpRouter(options: {
         tools: [
           {
             name: 'list_agents',
-            description: 'Call this first. Returns registered agents with capability tags, duration expectations, and online status.',
+            description: 'Call this first. Returns registered agents with capability tags, duration expectations, online (connected) status, listening presence, and last_claim_at.',
             inputSchema: {
               type: 'object',
               properties: {},

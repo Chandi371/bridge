@@ -20,6 +20,9 @@ export class BridgeDatabase {
         expected_duration TEXT NOT NULL,
         token_hash TEXT NOT NULL,
         online INTEGER NOT NULL DEFAULT 0,
+        listening INTEGER NOT NULL DEFAULT 0,
+        last_claim_at INTEGER,
+        kind TEXT NOT NULL DEFAULT 'listener',
         last_seen INTEGER,
         require_approval INTEGER NOT NULL DEFAULT 0,
         enabled INTEGER NOT NULL DEFAULT 1
@@ -97,20 +100,31 @@ export class BridgeDatabase {
   }
 
   // --- Agents ---
-  upsertAgent(agent: Omit<Agent, 'capabilities'> & { capabilities: string[] }) {
+  upsertAgent(
+    agent: Omit<Agent, 'capabilities' | 'listening' | 'last_claim_at' | 'kind'> & {
+      capabilities: string[];
+      listening?: number;
+      last_claim_at?: number | null;
+      kind?: string;
+    }
+  ) {
     const stmt = this.db.prepare(`
-      INSERT INTO agents (id, name, description, capabilities, expected_duration, token_hash, online, last_seen, require_approval, enabled)
-      VALUES (@id, @name, @description, @capabilities, @expected_duration, @token_hash, @online, @last_seen, @require_approval, @enabled)
+      INSERT INTO agents (id, name, description, capabilities, expected_duration, token_hash, online, listening, last_claim_at, kind, last_seen, require_approval, enabled)
+      VALUES (@id, @name, @description, @capabilities, @expected_duration, @token_hash, @online, @listening, @last_claim_at, @kind, @last_seen, @require_approval, @enabled)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
         capabilities = excluded.capabilities,
         expected_duration = excluded.expected_duration,
         token_hash = excluded.token_hash,
+        kind = excluded.kind,
         require_approval = excluded.require_approval,
         enabled = excluded.enabled
     `);
     stmt.run({
+      listening: agent.listening ?? 0,
+      last_claim_at: agent.last_claim_at ?? null,
+      kind: agent.kind ?? 'sdk',
       ...agent,
       capabilities: JSON.stringify(agent.capabilities),
     });
@@ -149,6 +163,25 @@ export class BridgeDatabase {
       now,
       id
     );
+    if (!online) {
+      this.db.prepare('UPDATE agents SET listening = 0 WHERE id = ?').run(id);
+    }
+  }
+
+  setAgentListening(id: string, listening: boolean) {
+    const now = Date.now();
+    if (listening) {
+      this.db.prepare('UPDATE agents SET listening = 1, last_claim_at = ?, last_seen = ? WHERE id = ?').run(
+        now,
+        now,
+        id
+      );
+    } else {
+      this.db.prepare('UPDATE agents SET listening = 0, last_seen = ? WHERE id = ?').run(
+        now,
+        id
+      );
+    }
   }
 
   // --- Rooms ---

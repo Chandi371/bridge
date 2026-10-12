@@ -59,6 +59,9 @@ Bridge exposes **exactly 5 tools** with identical semantics across MCP and REST.
          "capabilities": ["string"],
          "expected_duration": "string",
          "online": true,
+         "listening": true,
+         "last_claim_at": 1791810267110,
+         "kind": "listener",
          "last_seen": 1791791724438
        }
      ]
@@ -249,9 +252,12 @@ Bridge exposes **exactly 5 tools** with identical semantics across MCP and REST.
                       "capabilities": { "type": "array", "items": { "type": "string" } },
                       "expected_duration": { "type": "string" },
                       "online": { "type": "boolean" },
+                      "listening": { "type": "boolean" },
+                      "last_claim_at": { "type": ["number", "null"] },
+                      "kind": { "type": "string" },
                       "last_seen": { "type": ["number", "null"] }
                     },
-                    "required": ["id", "name", "description", "capabilities", "expected_duration", "online"]
+                    "required": ["id", "name", "description", "capabilities", "expected_duration", "online", "listening", "kind"]
                   }
                 }
               }
@@ -790,18 +796,19 @@ Keep-Alive: timeout=5
 
  RUN  v2.1.9 C:/Users/hanis/Documents/bridgy
 
- ✓ tests/phase7.test.ts (3 tests) 42ms
- ✓ tests/phase6.test.ts (6 tests) 67ms
- ✓ tests/phase5.test.ts (1 test) 128ms
- ✓ tests/phase4.test.ts (7 tests) 1718ms
- ✓ tests/phase1.test.ts (3 tests) 2980ms
- ✓ tests/phase3.test.ts (3 tests) 5319ms
- ✓ tests/phase2.test.ts (3 tests) 5974ms
+ ✓ tests/phase7.test.ts (3 tests) 86ms
+ ✓ tests/phase6.test.ts (6 tests) 232ms
+ ✓ tests/phase4.test.ts (7 tests) 2326ms
+ ✓ tests/phase5.test.ts (1 test) 412ms
+ ✓ tests/phase1.test.ts (3 tests) 3206ms
+ ✓ tests/phase3.test.ts (3 tests) 5607ms
+ ✓ tests/phase2.test.ts (3 tests) 6398ms
+ ✓ tests/phase8_listener.test.ts (6 tests) 11316ms
 
- Test Files  7 passed (7)
-      Tests  26 passed (26)
-   Start at  13:30:10
-   Duration  8.15s (transform 5.83s, setup 0ms, collect 11.50s, tests 16.23s, environment 5ms, prepare 2.54s)
+ Test Files  8 passed (8)
+      Tests  32 passed (32)
+   Start at  18:34:13
+   Duration  15.14s (transform 4.44s, setup 0ms, collect 13.88s, tests 29.58s, environment 5ms, prepare 8.71s)
 ```
 
 ---
@@ -810,14 +817,14 @@ Keep-Alive: timeout=5
 
 | Path | Purpose |
 | :--- | :--- |
-| `src/types.ts` | Complete TypeScript type definitions (Agent, Room, Message, Task, etc.) |
-| `src/db.ts` | SQLite schema and query methods via `better-sqlite3` with WAL mode & crash recovery |
-| `src/engine.ts` | Core stateful engine implementing exactly the 5 tools, single-note untrusted formatting, and budget guards |
-| `src/agent_hub.ts` | Outbound WebSocket hub for local agents with ping/pong heartbeats & reconnection |
+| `src/types.ts` | Complete TypeScript type definitions (Agent with listening/last_claim_at/kind, Room, Message, Task, etc.) |
+| `src/db.ts` | SQLite schema and query methods via `better-sqlite3` with WAL mode, listening tracking & crash recovery |
+| `src/engine.ts` | Core stateful engine implementing exactly the 5 tools, single-note untrusted formatting, and firm listener instructions |
+| `src/agent_hub.ts` | Outbound WebSocket hub for local agents supporting SDK agents & bridge-listener (`hello`, `presence`, `ack`, `progress`, `question`, `answer`, `result`, `error`, `cancel`) |
 | `src/sdk.ts` | Node.js TypeScript SDK (`BridgeAgentNode`, `BridgeContext`) |
 | `bridge_agent/__init__.py` | Python SDK (`BridgeAgent`, `BridgeContext`) for Python agents |
 | `src/rest_adapter.ts` | REST API routes with dual auth (`Bearer` & `X-API-Key`) |
-| `src/openapi.ts` | OpenAPI 3.1 schema definition generator with dynamic server URLs |
+| `src/openapi.ts` | OpenAPI 3.1 schema definition generator with dynamic server URLs and listener presence fields |
 | `src/server_apps.ts` | Public (3000) and Local (3001) Hono apps with strict physical listener separation |
 | `src/oauth.ts` | OAuth 2.1 server (RFC 8414, RFC 9728, PKCE S256, DCR, lockout protection) |
 | `src/mcp_adapter.ts` | MCP Streamable HTTP / SSE transport with tool definitions matching OpenAPI |
@@ -827,6 +834,8 @@ Keep-Alive: timeout=5
 | `src/server.ts` | Server orchestrator mounting both listeners, WSS hub, and recovery |
 | `src/cli.ts` | Unified entrypoint (`start` and `url`), tunnel managers, and password validation |
 | `agents.yaml` | Declarative agent manifest with template entries for custom agents |
+| `tests/phase8_listener.test.ts` | Full Vitest suite for bridge-listener protocol, listening expiry, abandoned claims, and live stdio execution |
 | `README.md` | User guide, quickstart, and architecture documentation |
 | `REPORT.md` | Verification report and phase delivery status |
 | `REVIEW.md` | Comprehensive review package with real outputs and exact schemas |
+

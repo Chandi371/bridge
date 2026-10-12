@@ -109,6 +109,9 @@ export class BridgeEngine extends EventEmitter {
     capabilities: string[];
     expected_duration: string;
     online: boolean;
+    listening: boolean;
+    last_claim_at: number | null;
+    kind: string;
     last_seen: number | null;
   }> {
     const agents = this.db.listAgents();
@@ -119,6 +122,9 @@ export class BridgeEngine extends EventEmitter {
       capabilities: a.capabilities,
       expected_duration: a.expected_duration,
       online: Boolean(a.online),
+      listening: Boolean(a.listening),
+      last_claim_at: a.last_claim_at,
+      kind: a.kind || 'listener',
       last_seen: a.last_seen,
     }));
   }
@@ -136,8 +142,15 @@ export class BridgeEngine extends EventEmitter {
       }
     }
 
-    // 2. Get or create room
-    const room = this.db.getOrCreateRoom(params.room_id);
+    // 2. Get or create room (or infer from reply_to if replying to a question/message)
+    let targetRoomId = params.room_id;
+    if (!targetRoomId && params.reply_to) {
+      const parentMsg = this.db.getMessageById(params.reply_to);
+      if (parentMsg) {
+        targetRoomId = parentMsg.room_id;
+      }
+    }
+    const room = this.db.getOrCreateRoom(targetRoomId);
 
     // Loop & turn protections
     if (room.status === 'paused' || room.status === 'ended') {
@@ -268,6 +281,18 @@ export class BridgeEngine extends EventEmitter {
 
       // Emit event so agent hub or dispatchers can dispatch to WebSocket
       this.emit('task:created', task);
+
+      // If agent is connected but not listening (e.g. listener agent waiting for worker loop)
+      const currentAgent = this.db.getAgentById(targetAgent.id) || targetAgent;
+      if (currentAgent.online && !currentAgent.listening && currentAgent.kind === 'listener') {
+        return {
+          room_id: room.id,
+          task_id: task.id,
+          status: 'running',
+          messages: [],
+          next_step: `Agent ${targetAgent.name} is open but not listening. Tell the user to start its worker loop, then call listen with task_id ${task.id}.`,
+        };
+      }
 
       // Long-poll wait up to waitSec for task progress/done/question
       return await this.waitForTaskOrMessages(room.id, task.id, waitSec, userMsg.seq, sender);

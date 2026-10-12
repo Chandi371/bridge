@@ -16,7 +16,7 @@ export const openApiSpec = {
       get: {
         operationId: "list_agents",
         summary: "List all available agents and their status",
-        description: "Call this first. Returns registered agents with capability tags, duration expectations, and online status.",
+        description: "Call this first. Returns registered agents with capability tags, duration expectations, online (connected) status, listening presence, and last_claim_at.",
         responses: {
           "200": {
             "description": "Agent list",
@@ -32,10 +32,13 @@ export const openApiSpec = {
                       "description": { "type": "string" },
                       "capabilities": { "type": "array", "items": { "type": "string" } },
                       "expected_duration": { "type": "string" },
-                      "online": { "type": "boolean" },
+                      "online": { "type": "boolean", "description": "Whether WebSocket connection is alive" },
+                      "listening": { "type": "boolean", "description": "Whether agent called claim_task within last 60s" },
+                      "last_claim_at": { "type": ["number", "null"] },
+                      "kind": { "type": "string" },
                       "last_seen": { "type": ["number", "null"] }
                     },
-                    "required": ["id", "name", "description", "capabilities", "expected_duration", "online"]
+                    "required": ["id", "name", "description", "capabilities", "expected_duration", "online", "listening"]
                   }
                 }
               }

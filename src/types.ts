@@ -7,7 +7,10 @@ export const AgentSchema = z.object({
   capabilities: z.array(z.string()),
   expected_duration: z.string(), // e.g. "fast <10s" | "slow 1-3 min"
   token_hash: z.string(),
-  online: z.number().int().default(0), // 0 or 1 in SQLite
+  online: z.number().int().default(0), // 0 or 1 in SQLite (connected)
+  listening: z.number().int().default(0), // 0 or 1 in SQLite (active claim_task within 60s)
+  last_claim_at: z.number().int().nullable().default(null),
+  kind: z.string().default('sdk'), // 'listener' | 'command' | 'webhook' | 'sdk'
   last_seen: z.number().int().nullable().default(null),
   require_approval: z.number().int().default(0), // 0 or 1
   enabled: z.number().int().default(1), // 0 or 1

@@ -75,7 +75,7 @@ export class AgentHub {
 
         if (type === 'hello') {
           // Authentication: token must match token_hash in DB
-          const { agent_id, token } = msg;
+          const { agent_id, token, capabilities, version } = msg;
           const agent = this.engine.db.getAgentById(agent_id) || this.engine.db.getAgentByName(agent_id);
           if (!agent) {
             ws.send(JSON.stringify({ type: 'error', message: `Unknown agent '${agent_id}'` }));
@@ -90,6 +90,18 @@ export class AgentHub {
             return;
           }
 
+          // If capabilities provided in hello, update agent capabilities in DB
+          if (Array.isArray(capabilities) && capabilities.length > 0) {
+            this.engine.db.db.prepare('UPDATE agents SET capabilities = ? WHERE id = ?').run(
+              JSON.stringify(capabilities),
+              agent.id
+            );
+          }
+
+          // If listener explicitly provides version or kind === 'listener'
+          const agentKind = msg.kind || (version ? 'listener' : agent.kind || 'sdk');
+          this.engine.db.db.prepare('UPDATE agents SET kind = ? WHERE id = ?').run(agentKind, agent.id);
+
           authenticatedAgentId = agent.id;
           this.connections.set(agent.id, {
             agentId: agent.id,
@@ -100,6 +112,11 @@ export class AgentHub {
           });
 
           this.engine.db.setAgentOnline(agent.id, true);
+          // SDK and command agents are listening immediately; listener agents report presence explicitly
+          if (agentKind !== 'listener') {
+            this.engine.db.setAgentListening(agent.id, true);
+          }
+
           ws.send(JSON.stringify({ type: 'ack', status: 'authenticated', agent_id: agent.id }));
 
           // Check if any pending tasks waiting for this agent
@@ -116,6 +133,13 @@ export class AgentHub {
         const conn = this.connections.get(authenticatedAgentId);
         if (conn) {
           conn.lastHeartbeat = Date.now();
+        }
+
+        if (type === 'presence') {
+          // Presence update from listener agent (listening: true/false or status: 'listening'|'connected')
+          const isListening = msg.listening === true || msg.status === 'listening';
+          this.engine.db.setAgentListening(authenticatedAgentId, isListening);
+          return;
         }
 
         if (type === 'pong' || type === 'ping') {
