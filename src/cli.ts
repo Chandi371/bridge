@@ -131,6 +131,7 @@ Options configured via .env:
     const parsed = YAML.parse(fileContent);
 
     if (parsed && Array.isArray(parsed.agents)) {
+      for (const agentDef of parsed.agents) {
         const token = agentDef.token || `token_${agentDef.id}_${Math.random().toString(36).substring(2, 7)}`;
         if (agentDef.kind === 'command') {
           server.runner.registerAndStartCommandAgent(agentDef, token);
