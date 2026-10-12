@@ -133,6 +133,18 @@ export class BridgeEngine extends EventEmitter {
       throw new Error(`Room '${room.id}' exceeded max_messages limit (${room.max_messages}). Room paused.`);
     }
 
+    // Check consecutive turns without human intervention
+    if (senderKind === 'human') {
+      this.db.db.prepare('UPDATE rooms SET consecutive_turns = 0 WHERE id = ?').run(room.id);
+    } else {
+      const nextTurns = room.consecutive_turns + 1;
+      if (nextTurns > room.max_consecutive_turns) {
+        this.db.updateRoomStatus(room.id, 'paused');
+        throw new Error(`Room '${room.id}' exceeded max consecutive automated turns (${room.max_consecutive_turns}) without human input. Room paused.`);
+      }
+      this.db.db.prepare('UPDATE rooms SET consecutive_turns = ? WHERE id = ?').run(nextTurns, room.id);
+    }
+
     // Ensure sender participant registered
     this.db.addParticipant(room.id, sender, senderKind, `${senderKind}:${sender}`);
 
@@ -158,10 +170,47 @@ export class BridgeEngine extends EventEmitter {
       };
     }
 
-    // 4. If target is an agent, start a task
+    // 4. If target is an agent
     if (targetAgent) {
       if (!targetAgent.enabled) {
         throw new Error(`Agent '${targetAgent.name}' is currently disabled.`);
+      }
+
+      // Check if this is an answer to an existing question
+      if (params.reply_to) {
+        const replyMsg = this.db.getMessageById(params.reply_to);
+        if (replyMsg && replyMsg.type === 'question') {
+          // Find the active task in needs_input for this agent/room
+          const activeTasks = this.db.getActiveTasksForAgent(targetAgent.id);
+          const inputTask = activeTasks.find((t) => t.status === 'needs_input' && t.room_id === room.id);
+          if (inputTask) {
+            // Add the answer message
+            const answerMsg = this.db.addMessage({
+              room_id: room.id,
+              sender,
+              recipient: targetAgent.name,
+              reply_to: params.reply_to,
+              type: 'answer',
+              content: params.content,
+            });
+
+            // Put task back into running
+            this.db.updateTask(inputTask.id, {
+              status: 'running',
+              progress_text: `Received answer for question ${params.reply_to}`,
+            });
+
+            // Emit answer event to notify agent hub
+            this.emit('task:answered', {
+              task_id: inputTask.id,
+              question_id: params.reply_to,
+              answer: params.content,
+            });
+
+            // Wait for next task step
+            return await this.waitForTaskOrMessages(room.id, inputTask.id, waitSec, answerMsg.seq);
+          }
+        }
       }
 
       // Check max concurrent tasks (default 2)

@@ -28,6 +28,23 @@ export class AgentHub {
     this.engine.on('task:cancelled', (taskId: string) => {
       this.notifyCancel(taskId);
     });
+
+    this.engine.on('task:answered', (event: { task_id: string; question_id: string; answer: string }) => {
+      this.dispatchAnswer(event.task_id, event.answer);
+    });
+  }
+
+  public dispatchAnswer(taskId: string, answer: string) {
+    const task = this.engine.db.getTask(taskId);
+    if (!task) return;
+    const conn = this.connections.get(task.agent_id);
+    if (conn && conn.ws.readyState === WebSocket.OPEN) {
+      conn.ws.send(JSON.stringify({
+        type: 'answer',
+        task_id: taskId,
+        answer,
+      }));
+    }
   }
 
   public setupWebSocket(wss: WebSocketServer) {
