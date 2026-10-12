@@ -310,8 +310,14 @@ export class BridgeEngine extends EventEmitter {
           };
         }
 
-        // If messages arrived
+        // If new messages arrived in room since startCursor
         if (messages.length > 0) {
+          const count = this.incrementPollCount(task.id);
+          let nextStep = `Task still running. This is NOT the final answer. Call listen with task_id ${task.id} again immediately. Do not answer the user yet.`;
+          if (count >= 5) {
+            nextStep = `This is taking long. Tell the user the room_id/task_id and that it is still running; offer to check again when they ask.`;
+          }
+
           return {
             status: 'running',
             messages: messages.map((m) => ({
@@ -329,7 +335,7 @@ export class BridgeEngine extends EventEmitter {
             partial_output: task.partial_output,
             truncated: false,
             cursor: latestCursor,
-            next_step: `Task still running. This is NOT the final answer. Call listen with task_id ${task.id} again immediately. Do not answer the user yet.`,
+            next_step: nextStep,
           };
         }
       } else if (params.room_id) {
