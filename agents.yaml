@@ -1,0 +1,16 @@
+agents:
+  - id: echo-agent
+    name: echo
+    description: "Instant echo agent that reflects prompts back. Best for quick connection testing."
+    kind: command
+    command: "node -e \"process.stdin.on('data', d => process.stdout.write('Echo: ' + d.toString()))\""
+    expected_duration: "fast <10s"
+    require_approval: false
+
+  - id: python-sample
+    name: sample_py
+    description: "A fast local Python script agent."
+    kind: command
+    command: "python -c \"import sys; print('Python agent processed: ' + sys.stdin.read().strip())\""
+    expected_duration: "fast <10s"
+    require_approval: false
