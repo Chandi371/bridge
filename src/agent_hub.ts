@@ -16,6 +16,7 @@ export class AgentHub {
   private connections: Map<string, AgentConnection> = new Map(); // agentId -> AgentConnection
   private pingInterval: NodeJS.Timeout | null = null;
   public wss: WebSocketServer | null = null;
+  private servers: WebSocketServer[] = [];
 
   constructor(engine: BridgeEngine) {
     this.engine = engine;
@@ -48,21 +49,29 @@ export class AgentHub {
   }
 
   public setupWebSocket(wss: WebSocketServer) {
+    this.servers.push(wss);
     this.wss = wss;
 
     wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       this.handleConnection(ws, req);
     });
 
-    // Start 20s ping/pong heartbeat check
-    this.pingInterval = setInterval(() => {
-      this.checkHeartbeats();
-    }, 20000);
+    // Start 20s ping/pong heartbeat check if not already running
+    if (!this.pingInterval) {
+      this.pingInterval = setInterval(() => {
+        this.checkHeartbeats();
+      }, 20000);
+    }
   }
 
   public stop() {
     if (this.pingInterval) clearInterval(this.pingInterval);
-    if (this.wss) this.wss.close();
+    for (const server of this.servers) {
+      try {
+        server.close();
+      } catch {}
+    }
+    this.servers = [];
   }
 
   private handleConnection(ws: WebSocket, req: IncomingMessage) {

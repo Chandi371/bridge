@@ -104,17 +104,46 @@ CLOUDFLARE_TUNNEL_MODE=quick
 
 ---
 
-## 5. Laptop Caveats & Reliability
+## 5. Cloud / Render Deployment & Remote Worker Listener
+
+When Bridge is deployed to a cloud host (such as Render at `https://bridgy-relay.onrender.com`), cloud containers route external traffic exclusively to the public listener port (`PORT`, default 3000).
+
+### Architecture & Handshake Security
+- **Public WebSocket Ingress**: The public listener accepts WebSocket upgrades at `/agent/ws` over secure TLS (`wss://`).
+- **Handshake Token Authentication**: To prevent unauthorized connections from holding sockets open on the public ingress, the server verifies the agent's authentication token directly during the HTTP upgrade handshake (via `?token=<token>`, `?agent=<id>&token=<token>`, `Authorization: Bearer <token>`, or `x-agent-token`). Connections without a matching configured agent token are immediately rejected with HTTP `401 Unauthorized`.
+- **Local Isolation Preserved**: The local loopback listener (`127.0.0.1:3001`) remains active for local processes, scripts, and tests.
+
+### Configuring Rotated Tokens on Render
+Supply the agent token securely via environment variables (never hardcoded in source control):
+- In Render Dashboard -> Environment Variables (or `.env` locally):
+  `AGENT_ANTIGRAVITY_TOKEN=<YOUR_ROTATED_TOKEN>`
+
+### Connecting the Local Worker to Render
+Point `bridge-listener` to the Render public WSS endpoint using the rotated token:
+
+```bash
+bridge-listener.exe \
+  --agent antigravity \
+  --token "<YOUR_ROTATED_TOKEN>" \
+  --bridge "wss://bridgy-relay.onrender.com/agent/ws?token=<YOUR_ROTATED_TOKEN>" \
+  --allow-remote
+```
+
+*Note: `--allow-remote` is required by `bridge-listener` when connecting to non-loopback hosts and mandates `wss://` encrypted transport.*
+
+---
+
+## 6. Laptop Caveats & Reliability
 
 - **Prevent Sleep / Lid Closing**:
   - Windows: Use `powercfg /change standby-timeout-ac 0` or keep plugged in with display sleep only.
   - macOS: Run `caffeinate -d -s -u`.
 - **Network Changes**: If your local IP changes, cloudflared maintains outbound connections automatically without needing port-forwarding.
-- **Key Rotation**: Rotate `BRIDGE_API_KEY` and `ADMIN_PASSWORD` in `.env` and restart.
+- **Key Rotation**: Rotate `BRIDGE_API_KEY`, `ADMIN_PASSWORD`, and agent tokens (`AGENT_<ID>_TOKEN`) in `.env` / Render environment and restart.
 
 ---
 
-## 6. Testing
+## 7. Testing
 
 Run all unit and integration test suites:
 ```bash

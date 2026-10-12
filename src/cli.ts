@@ -132,7 +132,17 @@ Options configured via .env:
 
     if (parsed && Array.isArray(parsed.agents)) {
       for (const agentDef of parsed.agents) {
-        const token = agentDef.token || `token_${agentDef.id}_${Math.random().toString(36).substring(2, 7)}`;
+        const envTokenKey = `AGENT_${agentDef.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_TOKEN`;
+        const envNameKey = `AGENT_${agentDef.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_TOKEN`;
+        let token = process.env[envTokenKey] || process.env[envNameKey] || agentDef.token;
+        if (typeof token === 'string' && token.startsWith('${') && token.endsWith('}')) {
+          const varName = token.slice(2, -1);
+          token = process.env[varName] || token;
+        }
+        if (!token) {
+          token = `token_${agentDef.id}_${crypto.randomBytes(8).toString('hex')}`;
+        }
+
         if (agentDef.kind === 'command') {
           server.runner.registerAndStartCommandAgent(agentDef, token);
           console.log(`  -> Started Command Agent: [${agentDef.name}]`);
@@ -156,7 +166,7 @@ Options configured via .env:
             require_approval: agentDef.require_approval ? 1 : 0,
             enabled: 1,
           });
-          console.log(`  -> Registered Listener Agent: [${agentDef.name}] (Token: ${token})`);
+          console.log(`  -> Registered Listener Agent: [${agentDef.name}]`);
         }
       }
     }

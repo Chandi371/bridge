@@ -32,6 +32,7 @@ export class BridgeServer {
   private publicServer: any;
   private localServer: any;
   private localWss: WebSocketServer | null = null;
+  private publicWss: WebSocketServer | null = null;
 
   constructor(config: BridgeConfig) {
     this.config = config;
@@ -93,6 +94,21 @@ export class BridgeServer {
       port: this.config.publicPort,
     });
 
+    // Mount Agent WebSocket hub onto public server (requires valid agent token on handshake)
+    this.publicWss = new WebSocketServer({
+      server: this.publicServer,
+      path: '/agent/ws',
+      verifyClient: (info, callback) => {
+        const verified = this.verifyHandshakeToken(info.req);
+        if (!verified) {
+          callback(false, 401, 'Unauthorized: Valid agent token required on handshake');
+        } else {
+          callback(true);
+        }
+      },
+    });
+    this.hub.setupWebSocket(this.publicWss);
+
     // 5. Setup Local App (Admin & Dashboard)
     const localApp = createLocalApp({
       engine: this.engine,
@@ -107,20 +123,61 @@ export class BridgeServer {
       hostname: '127.0.0.1',
     });
 
-    // Mount Agent WebSocket hub onto local server
+    // Mount Agent WebSocket hub onto local server (preserves local dual-port behavior)
     this.localWss = new WebSocketServer({
       server: this.localServer,
       path: '/agent/ws',
     });
     this.hub.setupWebSocket(this.localWss);
 
-    console.log(`[Bridge] Public listener started on port ${this.config.publicPort}`);
+    console.log(`[Bridge] Public listener started on port ${this.config.publicPort} (HTTP & /agent/ws WSS)`);
     console.log(`[Bridge] Local listener started on 127.0.0.1:${this.config.localPort}`);
+  }
+
+  public verifyHandshakeToken(req: any): boolean {
+    let token: string | null = null;
+    let agentId: string | null = null;
+
+    try {
+      const url = new URL(req.url || '', 'http://localhost');
+      token = url.searchParams.get('token') || url.searchParams.get('agent_token');
+      agentId = url.searchParams.get('agent') || url.searchParams.get('agent_id');
+    } catch {}
+
+    if (!token && req.headers) {
+      const authHeader = req.headers['authorization'];
+      if (typeof authHeader === 'string') {
+        const match = authHeader.match(/^Bearer\s+(.+)$/i);
+        token = match ? match[1].trim() : authHeader.trim();
+      }
+    }
+
+    if (!token && req.headers) {
+      const agentHeader = req.headers['x-agent-token'];
+      if (typeof agentHeader === 'string') {
+        token = agentHeader.trim();
+      }
+    }
+
+    if (!token) {
+      return false;
+    }
+
+    const tokenHash = this.engine.hashToken(token);
+
+    if (agentId) {
+      const agent = this.db.getAgentById(agentId) || this.db.getAgentByName(agentId);
+      return !!(agent && agent.enabled && agent.token_hash === tokenHash);
+    }
+
+    const agent = this.db.getAgentByTokenHash(tokenHash);
+    return !!agent;
   }
 
   public async stop(): Promise<void> {
     this.runner.stopAll();
     this.hub.stop();
+    if (this.publicWss) this.publicWss.close();
     if (this.localWss) this.localWss.close();
     if (this.publicServer) await new Promise<void>((r) => this.publicServer.close(() => r()));
     if (this.localServer) await new Promise<void>((r) => this.localServer.close(() => r()));

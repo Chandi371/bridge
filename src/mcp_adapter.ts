@@ -66,11 +66,36 @@ export function createMcpRouter(options: {
     });
   });
 
-  // POST /mcp/messages: Streamable HTTP message handling
-  router.post('/mcp/messages', async (c) => {
+  const handleMcpJsonRpc = async (c: any) => {
     try {
       const body = await c.req.json();
       const mcpServer = setupMcpServer(options.engine);
+
+      // Notifications (no id)
+      if (body.id === undefined || (typeof body.method === 'string' && body.method.startsWith('notifications/'))) {
+        return c.text('', 200);
+      }
+
+      if (body.method === 'initialize') {
+        return c.json({
+          jsonrpc: '2.0',
+          id: body.id,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: {
+              tools: {},
+            },
+            serverInfo: {
+              name: 'bridge-mcp-server',
+              version: '1.0.0',
+            },
+          },
+        });
+      }
+
+      if (body.method === 'ping') {
+        return c.json({ jsonrpc: '2.0', id: body.id, result: {} });
+      }
 
       // Handle JSON-RPC method
       if (body.method === 'tools/list') {
@@ -96,7 +121,11 @@ export function createMcpRouter(options: {
         error: { code: -32603, message: e.message },
       }, 500);
     }
-  });
+  };
+
+  // Support both POST /mcp and POST /mcp/messages for Streamable HTTP & SSE
+  router.post('/mcp', handleMcpJsonRpc);
+  router.post('/mcp/messages', handleMcpJsonRpc);
 
   // DELETE /mcp: Session termination
   router.delete('/mcp', (c) => {

@@ -159,6 +159,15 @@ export class BridgeDatabase {
     };
   }
 
+  getAgentByTokenHash(tokenHash: string): (Agent & { capabilities: string[] }) | null {
+    const row = this.db.prepare('SELECT * FROM agents WHERE token_hash = ? AND enabled = 1').get(tokenHash) as any;
+    if (!row) return null;
+    return {
+      ...row,
+      capabilities: JSON.parse(row.capabilities),
+    };
+  }
+
   listAgents(): (Agent & { capabilities: string[] })[] {
     const rows = this.db.prepare('SELECT * FROM agents WHERE enabled = 1').all() as any[];
     return rows.map((r) => ({
